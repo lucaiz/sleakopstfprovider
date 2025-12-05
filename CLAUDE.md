@@ -451,6 +451,49 @@ For every code review or development task, you provide structured feedback in ex
 - Support AWS provider account selection
 - Respect resource dependencies (e.g., services depend on projects, deployments depend on environments)
 
+### Async Resource Handling Pattern (Added 2025-12-05, POC Phase)
+**Note**: This pattern is based on initial implementation for Cluster resource POC. It will be tested, refined, and updated based on real-world behavior.
+
+SleakOps Core uses Django FSM for resource state management. Resources transition through states asynchronously.
+
+**Important**: Terraform should NOT wait for final states (`created`, `updated`, `deleted`) as these take too long.
+
+**Pattern to follow for MOST resources** (Cluster, Project, Environment, Deployment, Dependency, etc.):
+- **Create**: Wait for `creating` state (or `created`/`failed`), timeout: 5 minutes
+- **Update**: Wait for `updating` state (or `created`/`failed`), timeout: 5 minutes
+- **Delete**: Wait for `deleting` state (or `deleted`), timeout: 5 minutes
+
+The transitional states (`creating`, `updating`, `deleting`) indicate the operation has started successfully. The actual infrastructure provisioning continues asynchronously in SleakOps Core.
+
+**Reason**: Infrastructure operations (cluster creation, dependency provisioning) can take 20-30+ minutes. Terraform should return control to the user once the operation is confirmed to be in progress, not wait for completion.
+
+**Example implementation**:
+```go
+// Standard pattern - wait for 'creating' state
+stableCluster, err := r.waitForClusterState(ctx, clusterID, []string{"creating", "created", "failed"}, 5*time.Minute)
+```
+
+**EXCEPTION: Service Resource** (Added 2025-12-05)
+
+The `Service` resource is an **exception** to the async pattern. Services deploy quickly (typically < 2 minutes) and users expect immediate feedback.
+
+**Service pattern**:
+- **Create**: Wait for `created` state (full completion), timeout: 10-15 minutes
+- **Update**: Wait for `created` state (full completion), timeout: 10-15 minutes
+- **Delete**: Wait for `deleted` state (full completion), timeout: 10-15 minutes
+
+**Reason**: Service deployments are Kubernetes-based and complete relatively quickly. Users need to know if their service deployed successfully before proceeding with dependent resources.
+
+**Example implementation for Service**:
+```go
+// Service - wait for 'created' state (full completion)
+createdService, err := r.waitForServiceState(ctx, serviceID, []string{"created", "failed"}, 15*time.Minute)
+```
+
+**User communication**:
+- For most resources: Document that operations are async and Terraform returns when the operation starts
+- For Service: Document that Terraform waits for deployment completion
+
 ### Code Organization
 - One resource per file: `<resource_name>_resource.go`
 - One data source per file: `<resource_name>_data_source.go`
@@ -1047,6 +1090,16 @@ CLAUDE.md should grow through AI-developer interaction:
 **Question**: How should we parse and surface Django REST Framework error responses?
 **Impact**: User experience when Terraform operations fail
 **Process**: Handle case-by-case initially, document patterns as they emerge, consolidate into standard approach
+
+### Resource Async Behavior (INITIAL PATTERN - 2025-12-05)
+**Status**: POC phase - Pattern documented for Cluster resource, subject to change after testing
+**Decision**: Most resources use async pattern (return on transitional states), Service is the exception (wait for completion)
+**Impact**: User experience, timeout configurations, documentation requirements
+**Current approach**:
+- **Standard resources** (Cluster, Project, Environment, Deployment, Dependency): Wait for `creating`/`updating`/`deleting` states (5 min timeout)
+- **Service exception**: Wait for `created`/`deleted` states (10-15 min timeout)
+- Pattern documented in "Async Resource Handling Pattern" section above
+**Next steps**: Test with Cluster resource, iterate based on real-world behavior, update patterns accordingly
 
 ---
 
