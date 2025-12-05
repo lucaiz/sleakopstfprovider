@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 
-	"github.com/hashicorp-demoapp/sleakops-client-go"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -21,8 +20,9 @@ func NewCoffeesDataSource() datasource.DataSource {
 }
 
 // coffeesDataSource is the data source implementation.
+// NOTE: This is demo boilerplate code - will be replaced with actual SleakOps resources
 type coffeesDataSource struct {
-	client *sleakops.Client
+	client *Client
 }
 
 // coffeesDataSourceModel maps the data source schema data.

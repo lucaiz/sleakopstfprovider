@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 
-	"github.com/hashicorp-demoapp/sleakops-client-go"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -21,6 +20,7 @@ func NewOrderResource() resource.Resource {
 }
 
 // orderResourceModel maps the resource schema data.
+// NOTE: This is demo boilerplate code - will be replaced with actual SleakOps resources
 type orderResourceModel struct {
 	ID          types.String     `tfsdk:"id"`
 	Items       []orderItemModel `tfsdk:"items"`
@@ -45,7 +45,7 @@ type orderItemCoffeeModel struct {
 
 // orderResource is the resource implementation.
 type orderResource struct {
-	client *sleakops.Client
+	client *Client
 }
 
 // Metadata returns the resource type name.
