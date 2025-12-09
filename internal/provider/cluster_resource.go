@@ -154,11 +154,11 @@ func (r *clusterResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"state": schema.StringAttribute{
-				Description: "Cluster state (initial, creating, created, updating, deleting, deleted, failed). After apply, state will be 'creating', 'updating', or 'deleting' as operations are async.",
+				Description: "Cluster state (initial, creating, created, updating, deleting, deleted, error). After apply, state will be 'creating', 'updating', or 'deleting' as operations are async.",
 				Computed:    true,
 			},
 			"errors": schema.StringAttribute{
-				Description: "Error messages if cluster is in failed state",
+				Description: "Error messages if cluster is in error state",
 				Computed:    true,
 			},
 			"account": schema.StringAttribute{
@@ -252,19 +252,19 @@ func (r *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 	})
 
 	// Wait for cluster to reach 'creating' state (transitional state is sufficient)
-	stableCluster, err := r.waitForClusterState(ctx, clusterResp.ID, []string{"creating", "created", "failed"}, 5*time.Minute)
+	stableCluster, err := r.waitForClusterState(ctx, clusterResp.ID, []string{"creating", "created", "error"}, 5*time.Minute)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Waiting for Cluster",
-			"Cluster creation timed out or failed: "+err.Error(),
+			"Cluster creation timed out or error: "+err.Error(),
 		)
 		return
 	}
 
-	if stableCluster.State == "failed" {
+	if stableCluster.State == "error" {
 		resp.Diagnostics.AddError(
 			"Cluster Creation Failed",
-			fmt.Sprintf("Cluster reached failed state. Errors: %s", stableCluster.Errors),
+			fmt.Sprintf("Cluster reached error state. Errors: %s", stableCluster.Errors),
 		)
 		return
 	}
@@ -449,7 +449,7 @@ func (r *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	// Wait for cluster to reach 'updating' state (transitional state is sufficient)
-	stableCluster, err := r.waitForClusterState(ctx, clusterID, []string{"updating", "created", "failed"}, 5*time.Minute)
+	stableCluster, err := r.waitForClusterState(ctx, clusterID, []string{"updating", "created", "error"}, 5*time.Minute)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Waiting for Cluster Update",
@@ -458,7 +458,7 @@ func (r *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	if stableCluster.State == "failed" {
+	if stableCluster.State == "error" {
 		resp.Diagnostics.AddError(
 			"Cluster Update Failed",
 			fmt.Sprintf("Cluster reached failed state. Errors: %s", stableCluster.Errors),
@@ -502,10 +502,16 @@ func (r *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	clusterID := state.ID.ValueString()
+	clusterName := state.Name.ValueString()
 
-	tflog.Debug(ctx, "Deleting cluster", map[string]any{"id": clusterID})
+	tflog.Debug(ctx, "Deleting cluster", map[string]any{"id": clusterID, "name": clusterName})
 
-	httpResp, err := r.client.Delete(ctx, fmt.Sprintf("/api/cluster/%s/", clusterID))
+	// Delete confirmation payload with cluster name
+	deleteReq := map[string]string{
+		"name": clusterName,
+	}
+
+	httpResp, err := r.client.Delete(ctx, fmt.Sprintf("/api/cluster/%s/", clusterID), deleteReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Deleting Cluster",
@@ -524,16 +530,13 @@ func (r *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	// Wait for cluster to reach 'deleting' state (transitional state is sufficient)
-	deletingCluster, err := r.waitForClusterState(ctx, clusterID, []string{"deleting", "deleted"}, 5*time.Minute)
+	// Wait for cluster deletion (accepts 'deleting', 'deleted' states, or 404 not found)
+	err = r.waitForClusterDeletion(ctx, clusterID, []string{"deleting", "deleted"}, 5*time.Minute)
 	if err != nil {
 		// Deletion might have succeeded even if we couldn't verify
-		tflog.Warn(ctx, "Could not verify cluster deletion state", map[string]any{"error": err.Error()})
+		tflog.Warn(ctx, "Could not verify cluster deletion", map[string]any{"error": err.Error()})
 	} else {
-		tflog.Info(ctx, "Cluster is being deleted", map[string]any{
-			"id":    clusterID,
-			"state": deletingCluster.State,
-		})
+		tflog.Info(ctx, "Cluster deleted successfully", map[string]any{"id": clusterID})
 	}
 }
 
@@ -553,6 +556,66 @@ func (r *clusterResource) Configure(_ context.Context, req resource.ConfigureReq
 	}
 
 	r.client = client
+}
+
+// waitForClusterDeletion polls the cluster until it's deleted (404) or reaches a target state
+func (r *clusterResource) waitForClusterDeletion(ctx context.Context, clusterID string, targetStates []string, timeout time.Duration) error {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	timeoutChan := time.After(timeout)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeoutChan:
+			return fmt.Errorf("timeout waiting for cluster deletion")
+		case <-ticker.C:
+			httpResp, err := r.client.Get(ctx, fmt.Sprintf("/api/cluster/%s/", clusterID))
+			if err != nil {
+				tflog.Warn(ctx, "Error polling cluster state during deletion", map[string]any{"error": err.Error()})
+				continue
+			}
+
+			// 404 means cluster is fully deleted and removed from API
+			if httpResp.StatusCode == http.StatusNotFound {
+				httpResp.Body.Close()
+				tflog.Info(ctx, "Cluster deleted successfully (404 - not found)", map[string]any{"id": clusterID})
+				return nil
+			}
+
+			if httpResp.StatusCode != http.StatusOK {
+				httpResp.Body.Close()
+				tflog.Warn(ctx, "Non-200 status polling cluster deletion", map[string]any{"status": httpResp.StatusCode})
+				continue
+			}
+
+			var cluster clusterAPIResponse
+			if err := json.NewDecoder(httpResp.Body).Decode(&cluster); err != nil {
+				httpResp.Body.Close()
+				tflog.Warn(ctx, "Error parsing cluster response during deletion", map[string]any{"error": err.Error()})
+				continue
+			}
+			httpResp.Body.Close()
+
+			tflog.Debug(ctx, "Cluster deletion poll", map[string]any{
+				"id":    clusterID,
+				"state": cluster.State,
+			})
+
+			// Check if current state matches any target state (e.g., "deleting", "deleted")
+			for _, targetState := range targetStates {
+				if cluster.State == targetState {
+					tflog.Info(ctx, "Cluster reached deletion state", map[string]any{
+						"id":    clusterID,
+						"state": cluster.State,
+					})
+					return nil
+				}
+			}
+		}
+	}
 }
 
 // waitForClusterState polls the cluster until it reaches one of the target states

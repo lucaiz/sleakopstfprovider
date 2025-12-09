@@ -459,8 +459,8 @@ SleakOps Core uses Django FSM for resource state management. Resources transitio
 **Important**: Terraform should NOT wait for final states (`created`, `updated`, `deleted`) as these take too long.
 
 **Pattern to follow for MOST resources** (Cluster, Project, Environment, Deployment, Dependency, etc.):
-- **Create**: Wait for `creating` state (or `created`/`failed`), timeout: 5 minutes
-- **Update**: Wait for `updating` state (or `created`/`failed`), timeout: 5 minutes
+- **Create**: Wait for `creating` state (or `created`/`error`), timeout: 5 minutes
+- **Update**: Wait for `updating` state (or `created`/`error`), timeout: 5 minutes
 - **Delete**: Wait for `deleting` state (or `deleted`), timeout: 5 minutes
 
 The transitional states (`creating`, `updating`, `deleting`) indicate the operation has started successfully. The actual infrastructure provisioning continues asynchronously in SleakOps Core.
@@ -470,7 +470,7 @@ The transitional states (`creating`, `updating`, `deleting`) indicate the operat
 **Example implementation**:
 ```go
 // Standard pattern - wait for 'creating' state
-stableCluster, err := r.waitForClusterState(ctx, clusterID, []string{"creating", "created", "failed"}, 5*time.Minute)
+stableCluster, err := r.waitForClusterState(ctx, clusterID, []string{"creating", "created", "error"}, 5*time.Minute)
 ```
 
 **EXCEPTION: Service Resource** (Added 2025-12-05)
@@ -487,7 +487,7 @@ The `Service` resource is an **exception** to the async pattern. Services deploy
 **Example implementation for Service**:
 ```go
 // Service - wait for 'created' state (full completion)
-createdService, err := r.waitForServiceState(ctx, serviceID, []string{"created", "failed"}, 15*time.Minute)
+createdService, err := r.waitForServiceState(ctx, serviceID, []string{"created", "error"}, 15*time.Minute)
 ```
 
 **User communication**:
@@ -709,7 +709,7 @@ Before I implement `sleakops_[resource]`, I need to understand the SleakOps Core
 ### 3. State Management
 - Does this use Django FSM? If yes, what are the states?
 - After creating, what state should I wait for? (e.g., `CREATED`)
-- What indicates a failed operation? (e.g., `FAILED`, `ERROR` state)
+- What indicates a failed operation? (e.g., `ERROR` state)
 
 ### 4. Dependencies
 - Does this resource reference other resources? (foreign keys)
@@ -1012,7 +1012,7 @@ If developer includes `FORCE CODE WRITE` in their prompt:
   ```markdown
   ### Assumptions Made (verify these)
   - Assumed cluster name is required (not confirmed from model)
-  - Assumed FSM states are: CREATING, CREATED, FAILED (verify against actual states)
+  - Assumed FSM states are: CREATING, CREATED, ERROR (verify against actual states)
   ```
 
 ### Purpose

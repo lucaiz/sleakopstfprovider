@@ -76,7 +76,7 @@ func NewClient(baseURL, email, password, account string) (*Client, error) {
 
 // authenticate performs login and stores cookies
 func (c *Client) authenticate(ctx context.Context) error {
-	loginURL := fmt.Sprintf("%s/api/login", c.BaseURL)
+	loginURL := fmt.Sprintf("%s/api/login/", c.BaseURL)
 
 	payload := map[string]string{
 		"email":    c.Email,
@@ -252,8 +252,8 @@ func (c *Client) Patch(ctx context.Context, path string, body interface{}) (*htt
 }
 
 // Delete performs a DELETE request
-func (c *Client) Delete(ctx context.Context, path string) (*http.Response, error) {
-	return c.doRequest(ctx, "DELETE", path, nil)
+func (c *Client) Delete(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+	return c.doRequest(ctx, "DELETE", path, body)
 }
 
 // ParseBaseURL ensures the base URL is properly formatted

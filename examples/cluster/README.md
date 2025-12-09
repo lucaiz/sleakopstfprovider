@@ -4,7 +4,7 @@ This example demonstrates how to create a SleakOps EKS cluster using the Terrafo
 
 ## Prerequisites
 
-1. SleakOps Core API running at `http://localhost:8000`
+1. SleakOps Core API running at `http://localhost:8000/`
 2. Valid credentials (`email` and `password`)
 3. Valid `account` ID from your SleakOps Core instance
 
@@ -13,10 +13,10 @@ This example demonstrates how to create a SleakOps EKS cluster using the Terrafo
 1. Update `main.tf` with your credentials:
    ```hcl
    provider "sleakops" {
-     host     = "http://localhost:8000"
-     email    = "your-email@example.com"
-     password = "your-password"
-     account  = "your-account-uuid"
+     host     = "http://localhost:8000/"
+     email    = "admin@sleakops.com"
+     password = "admin"
+     account  = "504e33c4-5fd4-4dda-a11d-ea526d0e789d"
    }
    ```
 
